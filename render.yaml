@@ -30,7 +30,7 @@ services:
       - key: CORS_ORIGINS
         value: "*"
       - key: PYTHON_VERSION
-        value: "3.12"
+        value: "3.12.1"
 
 databases:
   - name: fuel-db
