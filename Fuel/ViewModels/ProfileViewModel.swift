@@ -115,13 +115,16 @@ final class ProfileViewModel: ObservableObject {
     let deliveryMethods: [String]
     let appearanceOptions: [String]
 
-    init(authService: AuthService = .shared) {
-        self.authService = authService
+    init() {
+        // Capture auth service first
+        let service = AuthService.shared
+        self.authService = service
         
-        // Initialize with mock data as defaults, will be overwritten if user is logged in
-        let initialProfile = Self.profileFromUser(authService.currentUser) ?? MockProfileData.profile
+        // Get initial profile data
+        let initialProfile = Self.profileFromUser(service.currentUser) ?? MockProfileData.profile
+        
+        // Initialize ALL stored properties before using 'self'
         self.profile = initialProfile
-
         self.activityLevels = MockProfileData.activityLevels
         self.goalTypes = MockProfileData.goalTypes
         self.vitaminsToTrack = MockProfileData.vitaminsToTrack
@@ -133,7 +136,7 @@ final class ProfileViewModel: ObservableObject {
         self.appearanceOptions = MockProfileData.appearanceOptions
         
         // Initialize from API user if available, else use mock
-        if let user = authService.currentUser, let apiProfile = user.profile {
+        if let user = service.currentUser, let apiProfile = user.profile {
             self.selectedActivityIndex = apiProfile.activity_level_index
             self.selectedGoalIndex = apiProfile.goal_type_index
             self.selectedVitamins = Set(apiProfile.selected_vitamins)
@@ -153,14 +156,14 @@ final class ProfileViewModel: ObservableObject {
             self.selectedAppearanceIndex = MockProfileData.selectedAppearanceIndex
         }
         
-        // Initialize editable fields
-        self.ageText = "\(profile.ageYears)"
-        self.heightText = profile.heightText
-        self.weightText = "\(profile.weightLbs)"
-        self.goalWeightText = "\(profile.goalWeightLbs)"
-        self.isMale = profile.isMale
+        // Initialize editable text fields (use initialProfile, not self.profile)
+        self.ageText = "\(initialProfile.ageYears)"
+        self.heightText = initialProfile.heightText
+        self.weightText = "\(initialProfile.weightLbs)"
+        self.goalWeightText = "\(initialProfile.goalWeightLbs)"
+        self.isMale = initialProfile.isMale
         
-        // Calculate initial macros
+        // Calculate macros with correct formula (don't use server values)
         recalculateMacros()
     }
     
@@ -169,6 +172,7 @@ final class ProfileViewModel: ObservableObject {
     private static func profileFromUser(_ user: UserResponse?) -> UserProfile? {
         guard let user = user, let apiProfile = user.profile else { return nil }
         
+        // Create profile with placeholder macros - they'll be recalculated locally
         return UserProfile(
             name: user.name,
             email: user.email,
@@ -178,10 +182,10 @@ final class ProfileViewModel: ObservableObject {
             weightLbs: apiProfile.weight_lbs,
             goalWeightLbs: apiProfile.goal_weight_lbs,
             isMale: apiProfile.is_male,
-            caloriesTarget: apiProfile.calories_target,
-            proteinTarget: apiProfile.protein_target,
-            carbsTarget: apiProfile.carbs_target,
-            fatTarget: apiProfile.fat_target
+            caloriesTarget: 0,  // Will be recalculated
+            proteinTarget: 0,
+            carbsTarget: 0,
+            fatTarget: 0
         )
     }
     
@@ -190,16 +194,22 @@ final class ProfileViewModel: ObservableObject {
     func refreshFromAPI() async {
         await authService.fetchCurrentUser()
         
-        if let newProfile = Self.profileFromUser(authService.currentUser) {
-            self.profile = newProfile
-            self.ageText = "\(newProfile.ageYears)"
-            self.heightText = newProfile.heightText
-            self.weightText = "\(newProfile.weightLbs)"
-            self.goalWeightText = "\(newProfile.goalWeightLbs)"
-            self.isMale = newProfile.isMale
-        }
-        
-        if let apiProfile = authService.currentUser?.profile {
+        if let user = authService.currentUser, let apiProfile = user.profile {
+            // Update profile fields (but NOT macros - we recalculate those locally)
+            profile.ageYears = apiProfile.age_years
+            profile.heightText = apiProfile.height_text
+            profile.weightLbs = apiProfile.weight_lbs
+            profile.goalWeightLbs = apiProfile.goal_weight_lbs
+            profile.isMale = apiProfile.is_male
+            
+            // Update text fields without triggering didSet saves
+            self.ageText = "\(apiProfile.age_years)"
+            self.heightText = apiProfile.height_text
+            self.weightText = "\(apiProfile.weight_lbs)"
+            self.goalWeightText = "\(apiProfile.goal_weight_lbs)"
+            self.isMale = apiProfile.is_male
+            
+            // Update preferences
             self.selectedActivityIndex = apiProfile.activity_level_index
             self.selectedGoalIndex = apiProfile.goal_type_index
             self.selectedVitamins = Set(apiProfile.selected_vitamins)
@@ -209,6 +219,9 @@ final class ProfileViewModel: ObservableObject {
             self.selectedDeliveryIndex = apiProfile.delivery_method_index
             self.selectedAppearanceIndex = apiProfile.appearance_index
         }
+        
+        // Always recalculate macros locally with correct formula
+        recalculateMacros()
     }
     
     // MARK: - Save to API (Debounced)
@@ -254,13 +267,8 @@ final class ProfileViewModel: ObservableObject {
             saveError = authService.error
         } else {
             saveError = nil
-            // Update local profile with server-calculated values
-            if let serverProfile = authService.currentUser?.profile {
-                profile.caloriesTarget = serverProfile.calories_target
-                profile.proteinTarget = serverProfile.protein_target
-                profile.carbsTarget = serverProfile.carbs_target
-                profile.fatTarget = serverProfile.fat_target
-            }
+            // Don't overwrite local macros - we use client-side calculation
+            // for immediate feedback with the correct formula
         }
     }
     
@@ -289,9 +297,11 @@ final class ProfileViewModel: ObservableObject {
             goalIndex: selectedGoalIndex
         )
         
+        // Pass weight for accurate protein calculation
         let macros = MacroCalculator.calculateMacros(
             targetCalories: targetCalories,
-            goalIndex: selectedGoalIndex
+            goalIndex: selectedGoalIndex,
+            weightLbs: profile.weightLbs
         )
         
         profile.caloriesTarget = targetCalories

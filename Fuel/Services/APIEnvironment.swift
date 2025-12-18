@@ -9,49 +9,66 @@ enum APIEnvironment {
     var baseURL: URL {
         switch self {
         case .local:
-            // For iOS Simulator running on Mac - connects to localhost
-            // For physical device on same network, use Mac's local IP
-            #if targetEnvironment(simulator)
+            // Only used for simulator - connects to localhost
             return URL(string: "http://localhost:8000")!
-            #else
-            // For physical device testing, use your Mac's local IP
-            // You can also use ngrok or similar for remote testing
-            return URL(string: "http://192.168.1.100:8000")!  // Replace with your Mac's IP
-            #endif
             
         case .production:
-            // Production URL - replace with your deployed backend
-            // Examples: Railway, Render, Fly.io, etc.
-            return URL(string: "https://fuel-api.example.com")!
+            // Render deployment URL - used by physical devices and release builds
+            return URL(string: "https://fuel-api-6jdw.onrender.com")!
+        }
+    }
+    
+    /// Human-readable name for debugging
+    var name: String {
+        switch self {
+        case .local: return "Local Development"
+        case .production: return "Production (Render)"
         }
     }
     
     /// Current active environment
-    /// Change this to switch between local and production
+    /// - Simulator in DEBUG: uses local backend (localhost)
+    /// - Physical device: always uses production (Render)
+    /// - Release builds: always uses production (Render)
     static var current: APIEnvironment {
         #if DEBUG
-        return .local
+            #if targetEnvironment(simulator)
+            // Simulator can use localhost
+            return .local
+            #else
+            // Physical device in debug - use production since localhost won't work
+            return .production
+            #endif
         #else
+        // Release builds always use production
         return .production
         #endif
     }
 }
 
-/// API Configuration
+/// API Configuration - centralized settings
 enum APIConfig {
+    /// Base URL from current environment
     static var baseURL: URL {
         APIEnvironment.current.baseURL
     }
     
-    /// Request timeout in seconds
-    static let timeoutInterval: TimeInterval = 30
+    /// Request timeout in seconds (longer for Render free tier cold starts)
+    static let timeoutInterval: TimeInterval = 90
     
-    /// API version prefix (if needed)
+    /// API version prefix (empty for now)
     static let apiVersion = ""
     
     /// Build full URL for an endpoint
     static func url(for endpoint: String) -> URL {
         baseURL.appendingPathComponent(endpoint)
     }
+    
+    /// Log current configuration (debug only)
+    static func logConfiguration() {
+        #if DEBUG
+        print("🔧 API Environment: \(APIEnvironment.current.name)")
+        print("🔧 Base URL: \(baseURL.absoluteString)")
+        #endif
+    }
 }
-

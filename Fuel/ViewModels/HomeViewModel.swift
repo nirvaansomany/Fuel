@@ -7,16 +7,21 @@ final class HomeViewModel: ObservableObject {
     @Published var selectedMealIndex: Int = 0
     @Published var isLoading = false
     @Published var error: String?
+    @Published var showMealLoggedAlert = false
     
     @Published var diningHalls: [DiningHallResponse] = []
     
     private let authService: AuthService
+    private let mealLog: MealLogService
 
-    init(authService: AuthService = .shared) {
-        self.authService = authService
+    init() {
+        let auth = AuthService.shared
+        let log = MealLogService.shared
+        self.authService = auth
+        self.mealLog = log
         
-        // Initialize with defaults/mock until data loads
-        self.dailySummary = Self.makeDailySummary(from: authService.currentUser)
+        // Initialize with real logged data
+        self.dailySummary = Self.makeDailySummary(from: auth.currentUser, mealLog: log)
         self.meals = MockHomeData.meals
         
         // Fetch real data
@@ -30,6 +35,17 @@ final class HomeViewModel: ObservableObject {
     var selectedMeal: RecommendedMeal? {
         guard meals.indices.contains(selectedMealIndex) else { return nil }
         return meals[selectedMealIndex]
+    }
+    
+    // MARK: - Meal Logging
+    
+    func logSelectedMeal() {
+        guard let meal = selectedMeal else { return }
+        mealLog.logMeal(meal)
+        
+        // Refresh summary to show updated totals
+        dailySummary = Self.makeDailySummary(from: authService.currentUser, mealLog: mealLog)
+        showMealLoggedAlert = true
     }
     
     // MARK: - Load Menu Data
@@ -76,8 +92,8 @@ final class HomeViewModel: ObservableObject {
     // MARK: - Refresh
     
     func refresh() async {
-        // Update daily summary from auth service
-        dailySummary = Self.makeDailySummary(from: authService.currentUser)
+        // Update daily summary with current logged data
+        dailySummary = Self.makeDailySummary(from: authService.currentUser, mealLog: mealLog)
         
         // Reload menu data
         await loadMenuData()
@@ -85,22 +101,32 @@ final class HomeViewModel: ObservableObject {
     
     // MARK: - Helpers
     
-    private static func makeDailySummary(from user: UserResponse?) -> DailySummary {
-        guard let profile = user?.profile else {
-            return MockHomeData.dailySummary
+    private static func makeDailySummary(from user: UserResponse?, mealLog: MealLogService) -> DailySummary {
+        let logged = mealLog.todaysTotals
+        
+        if let profile = user?.profile {
+            return DailySummary(
+                caloriesToday: logged.calories,
+                caloriesTarget: profile.calories_target,
+                proteinGrams: logged.protein,
+                proteinTarget: profile.protein_target,
+                carbsGrams: logged.carbs,
+                carbsTarget: profile.carbs_target,
+                fatGrams: logged.fat,
+                fatTarget: profile.fat_target
+            )
         }
         
-        // For now, show targets with 0 consumed (meal tracking not implemented yet)
-        // In a real app, this would come from a separate meal logging API
+        // Fallback to mock targets with real logged data
         return DailySummary(
-            caloriesToday: 0,
-            caloriesTarget: profile.calories_target,
-            proteinGrams: 0,
-            proteinTarget: profile.protein_target,
-            carbsGrams: 0,
-            carbsTarget: profile.carbs_target,
-            fatGrams: 0,
-            fatTarget: profile.fat_target
+            caloriesToday: logged.calories,
+            caloriesTarget: MockHomeData.dailySummary.caloriesTarget,
+            proteinGrams: logged.protein,
+            proteinTarget: MockHomeData.dailySummary.proteinTarget,
+            carbsGrams: logged.carbs,
+            carbsTarget: MockHomeData.dailySummary.carbsTarget,
+            fatGrams: logged.fat,
+            fatTarget: MockHomeData.dailySummary.fatTarget
         )
     }
     

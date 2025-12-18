@@ -54,7 +54,7 @@ struct ProfileView: View {
             .onAppear {
                 viewModel.selectedAppearanceIndex = appearanceIndex
             }
-            .onChange(of: viewModel.selectedAppearanceIndex) { newValue in
+            .onChange(of: viewModel.selectedAppearanceIndex) { _, newValue in
                 appearanceIndex = newValue
             }
             .alert("Export My Data", isPresented: $showExportAlert) {

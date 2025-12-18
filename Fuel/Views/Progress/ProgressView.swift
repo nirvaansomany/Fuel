@@ -31,7 +31,7 @@ struct ProgressView: View {
                 .padding(.vertical, FuelSpacing.lg)
             }
             .navigationTitle("Progress")
-            .onChange(of: viewModel.selectedSegmentIndex) { newValue in
+            .onChange(of: viewModel.selectedSegmentIndex) { _, newValue in
                 if newValue == 2 {
                     monthlyLineProgress = 0
                     withAnimation(.easeOut(duration: 1.0)) {
@@ -43,6 +43,9 @@ struct ProgressView: View {
                         yearlyLineProgress = 1
                     }
                 }
+            }
+            .onAppear {
+                viewModel.refresh()
             }
         }
     }

@@ -1,6 +1,7 @@
 """
 Authentication API routes: signup, login, /me
 """
+import logging
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
@@ -113,6 +114,9 @@ async def get_current_user(
     return user
 
 
+logger = logging.getLogger(__name__)
+
+
 @router.post("/signup", response_model=UserWithToken, status_code=status.HTTP_201_CREATED)
 async def signup(user_data: UserCreate, db: Session = Depends(get_db)):
     """
@@ -122,83 +126,97 @@ async def signup(user_data: UserCreate, db: Session = Depends(get_db)):
     - Optionally creates profile if provided
     - Returns user data + JWT token
     """
-    # Check if email already exists
-    existing_user = db.query(User).filter(User.email == user_data.email).first()
-    if existing_user:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Email already registered"
-        )
+    logger.info(f"Signup attempt for email: {user_data.email}")
     
-    # Create user
-    hashed_password = get_password_hash(user_data.password)
-    user = User(
-        email=user_data.email,
-        name=user_data.name,
-        hashed_password=hashed_password,
-    )
-    db.add(user)
-    db.flush()  # Get user.id without committing
-    
-    # Create profile (with defaults or provided data)
-    profile_data = user_data.profile
-    if profile_data:
-        # Calculate macros based on provided profile data
-        calories, protein, carbs, fat = calculate_all_macros(
-            weight_lbs=profile_data.weight_lbs,
-            height_text=profile_data.height_text,
-            age_years=profile_data.age_years,
-            is_male=profile_data.is_male,
-            activity_level_index=profile_data.activity_level_index,
-            goal_type_index=profile_data.goal_type_index,
-        )
+    try:
+        # Check if email already exists
+        existing_user = db.query(User).filter(User.email == user_data.email).first()
+        if existing_user:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Email already registered"
+            )
         
-        profile = Profile(
-            user_id=user.id,
-            age_years=profile_data.age_years,
-            height_text=profile_data.height_text,
-            weight_lbs=profile_data.weight_lbs,
-            goal_weight_lbs=profile_data.goal_weight_lbs,
-            is_male=profile_data.is_male,
-            activity_level_index=profile_data.activity_level_index,
-            goal_type_index=profile_data.goal_type_index,
-            calories_target=calories,
-            protein_target=protein,
-            carbs_target=carbs,
-            fat_target=fat,
-            selected_vitamins=list_to_csv(profile_data.selected_vitamins),
-            dietary_restrictions=list_to_csv(profile_data.dietary_restrictions),
-            disliked_foods=list_to_csv(profile_data.disliked_foods),
-            selected_dining_halls=list_to_csv(profile_data.selected_dining_halls),
-            delivery_method_index=profile_data.delivery_method_index,
-            appearance_index=profile_data.appearance_index,
+        # Create user
+        hashed_password = get_password_hash(user_data.password)
+        user = User(
+            email=user_data.email,
+            name=user_data.name,
+            hashed_password=hashed_password,
         )
-    else:
-        # Create profile with defaults
-        calories, protein, carbs, fat = calculate_all_macros(
-            weight_lbs=165, height_text="5'10\"", age_years=21,
-            is_male=True, activity_level_index=2, goal_type_index=0
+        db.add(user)
+        db.flush()  # Get user.id without committing
+        
+        # Create profile (with defaults or provided data)
+        profile_data = user_data.profile
+        if profile_data:
+            # Calculate macros based on provided profile data
+            calories, protein, carbs, fat = calculate_all_macros(
+                weight_lbs=profile_data.weight_lbs,
+                height_text=profile_data.height_text,
+                age_years=profile_data.age_years,
+                is_male=profile_data.is_male,
+                activity_level_index=profile_data.activity_level_index,
+                goal_type_index=profile_data.goal_type_index,
+            )
+            
+            profile = Profile(
+                user_id=user.id,
+                age_years=profile_data.age_years,
+                height_text=profile_data.height_text,
+                weight_lbs=profile_data.weight_lbs,
+                goal_weight_lbs=profile_data.goal_weight_lbs,
+                is_male=profile_data.is_male,
+                activity_level_index=profile_data.activity_level_index,
+                goal_type_index=profile_data.goal_type_index,
+                calories_target=calories,
+                protein_target=protein,
+                carbs_target=carbs,
+                fat_target=fat,
+                selected_vitamins=list_to_csv(profile_data.selected_vitamins),
+                dietary_restrictions=list_to_csv(profile_data.dietary_restrictions),
+                disliked_foods=list_to_csv(profile_data.disliked_foods),
+                selected_dining_halls=list_to_csv(profile_data.selected_dining_halls),
+                delivery_method_index=profile_data.delivery_method_index,
+                appearance_index=profile_data.appearance_index,
+            )
+        else:
+            # Create profile with defaults
+            calories, protein, carbs, fat = calculate_all_macros(
+                weight_lbs=165, height_text="5'10\"", age_years=21,
+                is_male=True, activity_level_index=2, goal_type_index=0
+            )
+            profile = Profile(
+                user_id=user.id,
+                calories_target=calories,
+                protein_target=protein,
+                carbs_target=carbs,
+                fat_target=fat,
+            )
+        
+        db.add(profile)
+        db.commit()
+        db.refresh(user)
+        
+        # Create access token (sub must be a string for JWT)
+        access_token = create_access_token(data={"sub": str(user.id), "email": user.email})
+        
+        logger.info(f"User created successfully: {user.id}")
+        
+        return UserWithToken(
+            user=user_to_response(user),
+            access_token=access_token,
+            token_type="bearer"
         )
-        profile = Profile(
-            user_id=user.id,
-            calories_target=calories,
-            protein_target=protein,
-            carbs_target=carbs,
-            fat_target=fat,
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Signup error: {type(e).__name__}: {e}")
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Registration failed: {str(e)}"
         )
-    
-    db.add(profile)
-    db.commit()
-    db.refresh(user)
-    
-    # Create access token (sub must be a string for JWT)
-    access_token = create_access_token(data={"sub": str(user.id), "email": user.email})
-    
-    return UserWithToken(
-        user=user_to_response(user),
-        access_token=access_token,
-        token_type="bearer"
-    )
 
 
 @router.post("/login", response_model=Token)
@@ -214,17 +232,29 @@ async def login(
     
     Returns JWT access token.
     """
-    user = db.query(User).filter(User.email == form_data.username).first()
+    logger.info(f"Login attempt for: {form_data.username}")
     
-    if not user or not verify_password(form_data.password, user.hashed_password):
+    try:
+        user = db.query(User).filter(User.email == form_data.username).first()
+        
+        if not user or not verify_password(form_data.password, user.hashed_password):
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Incorrect email or password",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+        
+        access_token = create_access_token(data={"sub": str(user.id), "email": user.email})
+        logger.info(f"Login successful for user: {user.id}")
+        return Token(access_token=access_token, token_type="bearer")
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Login error: {type(e).__name__}: {e}")
         raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Incorrect email or password",
-            headers={"WWW-Authenticate": "Bearer"},
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Login failed: {str(e)}"
         )
-    
-    access_token = create_access_token(data={"sub": str(user.id), "email": user.email})
-    return Token(access_token=access_token, token_type="bearer")
 
 
 @router.get("/me", response_model=UserResponse)
