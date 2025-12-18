@@ -1,0 +1,15 @@
+cat << EOF > .gitignore
+# Python
+backend/venv/
+__pycache__/
+*.pyc
+.env
+
+# iOS
+DerivedData/
+*.xcuserstate
+*.xcuserdata/
+
+# macOS
+.DS_Store
+EOF
